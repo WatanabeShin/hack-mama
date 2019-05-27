@@ -1,0 +1,194 @@
+// LINE developersのメッセージ送受信設定に記載のアクセストークン
+var ACCESS_TOKEN = 'TOKEN';
+var USER_ID = "USER_ID";　
+
+// カレンダーを取得する
+function getCalendar() {
+    return CalendarApp.getCalendarById('XXXXXXX@gmail.com');
+}
+
+function getEvents() {
+    var now = new Date();
+    // googleカレンダーより明日の予定を配列で取得。
+    var todayEvent = getCalendar().getEventsForDay(now);
+    // LINE Notifyに送るメッセージ
+    var msg = "";
+    // 予定がない時
+    if(todayEvent.length === 0) {
+        msg = "今日の予定はありません。";
+    }
+    // 予定がある時
+    else {
+        msg += "今日の予定は" + String(todayEvent.length) + "件あります。\n\n";
+        msg += allPlanToMsg(todayEvent);
+    }
+
+    return msg;
+}
+
+function allPlanToMsg(events/* array */) {
+    var msg = "";
+    events.forEach( function(event, index) {
+        var title = event.getTitle();
+        var start = event.getStartTime().getHours() + ":" + ("0" + event.getStartTime().getMinutes()).slice(-2);
+        var end = event.getEndTime().getHours() + ":" + ("0" + event.getEndTime().getMinutes()).slice(-2);
+
+        // 予定が終日の時
+        if( event.isAllDayEvent() ) {
+            msg += String(index + 1) + "件目: " + title + " 終日の予定です。\n\n";
+            return;
+        }
+        msg += String(index + 1) + "件目: " + title + " " + start + "~" + end + "\n\n";
+    });
+
+    return msg;
+}
+
+function doPost(e) {
+    // WebHookで受信した応答用Token
+    var replyToken = JSON.parse(e.postData.contents).events[0].replyToken;
+    // ユーザーのメッセージを取得
+    var userMessage = JSON.parse(e.postData.contents).events[0].message.text;
+    // 応答メッセージ用のAPI URL
+    var url = 'https://api.line.me/v2/bot/message/reply';
+
+    UrlFetchApp.fetch(url, {
+        'headers': {
+            'Content-Type': 'application/json; charset=UTF-8',
+            'Authorization': 'Bearer ' + ACCESS_TOKEN,
+        },
+        'method': 'post',
+        'payload': JSON.stringify({
+            'replyToken': replyToken,
+            'messages': [{
+                'type': 'text',
+                'text': userMessage,
+            }],
+        }),
+    });
+    return ContentService.createTextOutput(JSON.stringify({'content': 'post ok'})).setMimeType(ContentService.MimeType.JSON);
+}
+
+// 通知機能
+function push_message() {
+    var today = new Date();
+    var toWeekday = toWD(today);
+    var dustCollect = dustInfo(today);
+    var msgWeatherForecast = getTemperatureForecast();
+
+    var postData = {
+        "to": USER_ID,
+        "messages": [
+        {
+            "type": "text",
+            "text": "今日は、" +Utilities.formatDate( today, 'Asia/Tokyo', 'yyyy年M月d日') + toWeekday + "だよ！\n"
+                    + msgWeatherForecast[0] + msgWeatherForecast[1] + msgWeatherForecast[2] + "\n" + msgWeatherForecast[3] + "\n\n"
+                    + trafic() + "\n\n" + "今日のごみは" + dustCollect + "だよ！忘れないように！\n\n" + "【今日の運勢】\n" + fortune(today)['content']
+        }
+        ]}
+
+    var headers = {
+        "Content-Type": "application/json",
+        'Authorization': 'Bearer ' + ACCESS_TOKEN,
+    };
+
+    var options = {
+        "method": "post",
+        "headers": headers,
+        "payload": JSON.stringify(postData)
+    };
+
+    var response = UrlFetchApp.fetch("https://api.line.me/v2/bot/message/push", options);
+}
+
+// 天気予報の取得
+function getTemperatureForecast() {
+    const area = "東京地方"
+    var options =
+    {
+        "contentType" : "text/xml;charset=utf-8",
+        "method" : "get",
+    };
+    var response = UrlFetchApp.fetch("https://www.drk7.jp/weather/xml/13.xml", options);
+    var xmlDoc = XmlService.parse(response.getContentText());
+    var rootDoc = xmlDoc.getRootElement();
+    var region = parser.getElementById(rootDoc,area);
+    var weather = parser.getElementsByTagName(region, 'weather');
+    var temperature = parser.getElementsByTagName(region, 'range');
+    var rainyPercent = parser.getElementsByTagName(region, 'period');
+    var weathermsg = "■天気予報：" + area + "\n" + weather[0].getValue() + "\n"
+    var tempmsg ="■気温\n" + temperature[0].getValue() + "℃/" + temperature[1].getValue() + "℃\n";
+    var umbrellamsg = "■傘予想\n" + getUmbrellNecessary(rainyPercent[1].getValue(),rainyPercent[2].getValue(),rainyPercent[3].getValue()) + "\n";
+    var todo = getEvents();
+    var rainyTemperature = [weathermsg, tempmsg, umbrellamsg, todo];
+
+    return rainyTemperature
+}
+
+// 傘予想
+function getUmbrellNecessary(mor,eve,nig){
+    var msg = ""
+    if (mor < 30 && eve < 30 && nig < 30 ) {
+        msg = "傘は持たなくても良いね！";
+    }
+    if (mor == 30 || eve == 30 || nig == 30 ) {
+        msg = "折りたたみ傘があると安心！";
+    }
+    if (mor > 30 || eve > 30 || nig > 30 ) {
+        msg = "傘を持って行ったほうが良いね！";
+    }
+    return msg
+}
+
+//　曜日の日本語変換
+function toWD(date){
+    var myTbl = new Array("日","月","火","水","木","金","土","日");
+    var myDay = Utilities.formatDate(date, "JST", "u");
+    return "(" + myTbl[myDay] + ")";
+}
+
+// ゴミ出し情報
+function dustInfo(date) {
+    var dustCollect = ["なし", "普通ごみ", "空き缶/びん・ペットボトル","なし","普通ごみ","プラスチック製容器包装","ミックスペーパー" ,"なし"];
+    var myDay = Utilities.formatDate(date, "JST", "u");
+    var weekNum = Math.floor((date.getDate() - date.getDay() + 12 ) / 7);
+    // 第一と第三月曜は粗大ごみと小物金属も出せます
+    if ((weekNum == 1 || weekNum == 3) && myDay == 1) {
+        return "【" + dustCollect[myDay] + "と粗大ごみ・小物金属】";
+    }
+    return "【" + dustCollect[myDay] + "】";
+}
+
+// 占い
+function fortune(date) {
+    var date = new Date();
+    var formatDate = Utilities.formatDate( date, 'Asia/Tokyo', 'yyyy/MM/dd');
+    var response = UrlFetchApp.fetch("http://api.jugemkey.jp/api/horoscope/free/" + formatDate).getContentText();
+    var fortuneDate = JSON.parse(response)['horoscope'][formatDate];
+    for (i=0; i < fortuneDate.length; i++) {
+        // 乙女座だけほしい
+        if (fortuneDate[i]['sign'] == '乙女座') {
+            return fortuneDate[i];
+        }
+    }
+}
+
+// 遅延情報
+function trafic() {
+    var response = JSON.parse(UrlFetchApp.fetch("https://rti-giken.jp/fhc/api/train_tetsudo/delay.json").getContentText());
+
+    for (i=0; i < response.length; i++) {
+        if (response[i]['name'] == '小田急線') {
+            return response[i]['name'] + "は遅延しています。早めに家を出ましょう";
+        } else {
+            return "遅延情報はありません。ゆっくり家を出ましょう";
+        }
+    }
+}
+
+// スプレッドシート
+function speadSheet() {
+    var spreadsheet = SpreadsheetApp.openById('XXXXXXXXXXX');
+
+    return spreadsheet.getActiveSheet();
+}
