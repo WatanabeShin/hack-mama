@@ -175,7 +175,7 @@ function fortune(date) {
 
 // 遅延情報
 function trafic() {
-    var response = JSON.parse(UrlFetchApp.fetch("https://rti-giken.jp/fhc/api/train_tetsudo/delay.json").getContentText());
+    var response = JSON.parse(UrlFetchApp.fetch("https://tetsudo.rti-giken.jp/free/delay.json").getContentText());
 
     for (i=0; i < response.length; i++) {
         if (response[i]['name'] == '小田急線') {
